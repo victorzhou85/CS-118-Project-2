@@ -49,3 +49,4 @@ packets::packets(file* file)
 void packets::sendPacket(int* sending)
 // Discussion: given the sending index in order, send packet to socket connection, attached with timer and hander function
 ```
+----------- Initial request-------------
