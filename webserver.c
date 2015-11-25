@@ -20,38 +20,38 @@ typedef struct window{
 }* window_t;
 
 char** prepareFile(file *file){
-  //TODO
+  //TODO: Andrew
   // chunk the file into 984 bytes each and and 16 bytes header: the order will be: sequence#[4 bytes], fileSize[8 bytes], length[4 bytes], payload[984 bytes]
 }
 
 window_t window(char** segments){
-  // TODO
+  // TODO: Andrew
 }
 
 
 void updateOnAcked(window_t window, int ack){
-  // TODO
+  // TODO: Victor
   // Consider the situation when in the end of transfer
 }
 
 void timeOutHandler(window_t window){
-  // TODO
+  // TODO: Victor
   //
 }
 
 int* prepareToSend(window_t window){
-  // TODO
+  // TODO: Victor
   // Consider the situation when in the end of transfer
 }
 
 void sendPacket(window_t window, int* command){
-  // TODO
+  // TODO: Andrew
   // send pack according to command
   // udpate the window after we sent
 }
 
 file* findFile (char*){
-  // TODO
+  // TODO : Andrew
   // find file with the given file name and return the file pointer
 }
 
