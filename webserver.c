@@ -10,6 +10,8 @@
 */
 //#include "segment.h"
 //#include "sequence.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 typedef struct window{
   int startIndex; // the start of the window.
@@ -19,13 +21,61 @@ typedef struct window{
   char** segments;
 }* window_t;
 
-char** prepareFile(file *file){
+window_t window(FILE* file){
   //TODO: Andrew
   // chunk the file into 984 bytes each and and 16 bytes header: the order will be: sequence#[4 bytes], fileSize[8 bytes], length[4 bytes], payload[984 bytes]
-}
+  // create window based on chunks
+  
+	//PART 1: Parsing file into Char Segments
+	const size_t PAYLOAD = 984;
+	char *source = NULL; //create one string of the data which is to be parsed into an array of strings
+	
+	fseek(file, 0L, SEEK_END); //go to the end of the file
+	int fileSize = ftell(file); //retrieve the size of the file
+	source = malloc(sizeof(char)*(fileSize + 1)); //Allocate memory for the source String
 
-window_t window(char** segments){
-  // TODO: Andrew
+	
+	fseek(file, 0L, SEEK_SET); //go back to front of file
+	
+
+	size_t sourceLength = fread(source, sizeof(char), fileSize, file);	//read the file into source
+	source[sourceLength] = '\0';		
+
+	char** segments;	
+	size_t segmentCount = sourceLength/PAYLOAD; 	//retrieve the number of segments
+	if ( sourceLength % PAYLOAD > 0)
+		segmentCount += 1;			//adds another segment for an incomplete payload
+
+	segments = malloc(sizeof(char*)*segmentCount);	//allocate data for segment string
+	int i;
+	for ( i=0; i < segmentCount; i++){
+		segments[i] = malloc(sizeof(char)*PAYLOAD);		//allocate data for each individual segment
+	}
+	int count = 0;
+	int iter = 0;
+	for ( i=0; i < segmentCount; i++){				//for all segments
+		while (count < PAYLOAD && iter < sourceLength){		//while the specific segement is less then payload and the iterator is less then entire file size
+			segments[i][count] = source[iter];		//fill out the segment
+			count++;
+			iter++;
+		}
+		segments[i][count] = '\0'; 
+		count = 0;
+	}
+
+	free(source);  
+
+	//PART 2: Construct Window
+	window_t win = malloc (sizeof(int)*3 + sizeof(int*) + sizeof(char**));	//allocate memory for widow
+	win->acked = malloc(sizeof(int)*segmentCount);
+	win->segments = segments;
+	win->startIndex = 0; // the start of the window.
+  	win->windowLength = 1; // starts off at 1
+ 	win->nextToSend = 0; // the first 0 receive
+	
+	return win;
+
+
 }
 
 
@@ -50,7 +100,7 @@ void sendPacket(window_t window, int* command){
   // udpate the window after we sent
 }
 
-file* findFile (char*){
+FILE* findFile (char* c){
   // TODO : Andrew
   // find file with the given file name and return the file pointer
 }
@@ -88,7 +138,8 @@ int main(int argc, char *argv[])
     char* hi = "Received your message";
 
     socklen_t clilen;
-    struct sockaddr_in serv_addr, cli_addr;
+   struct sockaddr_in serv_addr, cli_addr;		
+   
 
     if (argc < 5) {
         fprintf(stderr,"ERROR, proper use: ./sender <port number> <cwnd> <p_loss> <p_corrupt>\n");
@@ -117,14 +168,14 @@ int main(int argc, char *argv[])
 
     clilen = sizeof(cli_addr);
 
-    file* requestFile; // FIXME: Read the document about allocate a new file in ram
+    FILE* requestFile; // FIXME: Read the document about allocate a new file in ram
 
     while (1) {
         int n;
         char buffer[256];
 
         bzero(buffer, 256);
-        n = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr_in *) &cli_addr, (socklen_t *) &clilen);
+        n = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr*) &cli_addr, (socklen_t *) &clilen);
         if (n < 0)
             error("ERROR reading from socket");
         else {
@@ -135,15 +186,14 @@ int main(int argc, char *argv[])
             // FIXME: if the file is not found, send something to client
         }
 
-        // bzero(buffer, 256);
-        n = sendto(sockfd,hi,strlen(hi), 0, (struct sockaddr_in*) &cli_addr, (socklen_t) clilen); //write to the socket
-        if (n < 0)
-            error("ERROR writing to socket");
     } /* end of while */
 
     /* init window */
+	
 
-    window_t server_window = window(prepareFile(requestFile));
+    //FIRST BURST OF COMMANDS
+
+    window_t server_window = window(requestFile);
     //FIXME: Not sure if anything missing
     int* lastCommand = prepareToSend(server_window);
     sendPacket(server_window, lastCommand); // first send
@@ -153,13 +203,13 @@ int main(int argc, char *argv[])
       int n;
       char buffer[256]; // buffer for acks
       bzero(buffer, 256);
-      n = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr_in *) &cli_addr, (socklen_t *) &clilen);
+      n = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr*) &cli_addr, (socklen_t *) &clilen);
       if (n < 0)
           error("ERROR reading from socket");
       else {
         int ack = 0;
         // TODO: parse the acks from buffer:
-        updateOnAcked(window, ack);
+        updateOnAcked(server_window, ack);
         lastCommand = prepareToSend(server_window);
         sendPacket(server_window, lastCommand);
         //TODO: free the lastCommand
