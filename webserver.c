@@ -44,8 +44,11 @@ window_t window(FILE* file){
 
 
 	//PART 1: Parsing file into Char Segments
-	//const size_t PAYLOAD = 984;
-	const size_t PAYLOAD = 10;
+	size_t PAYLOAD;
+	if(test==false)
+		PAYLOAD = 984;
+	else
+		PAYLOAD = 10;
 	char *source = NULL; //create one string of the data which is to be parsed into an array of strings
 	
 	fseek(file, 0L, SEEK_END); //go to the end of the file
