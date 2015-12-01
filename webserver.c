@@ -2,9 +2,7 @@
    The port number is passed as an argument
    This version runs forever, forking off a separate
    process for each connection
-
    Modified by Gregory Liu :)
-
    Returns an HTML response with headers for a requested file
    Returns 404 on improperly requested file or bad file
 */
@@ -21,6 +19,8 @@ typedef enum { false, true } bool;
 #include <sys/socket.h>
 #include <stdbool.h>
 
+static int const ssthresh = 5; // FIXME: Do we have to change this?
+
 bool test=false;
 
 
@@ -31,7 +31,11 @@ typedef struct window{
   int segmentCount;	//number of segments
   int* acked; // 0: not yet sent; 1: sent but not yet acked; 2: sent
   char** segments;
-  
+  int endRTTCommand;
+  // each time the prepareForSend function will update this property, when this ack sequence has been received by the sender, it indicate an RTT has been finished.
+  // This property only matters when the congestionAvoidence is finished.
+
+
 }* window_t;
 
 
@@ -40,9 +44,6 @@ window_t window(FILE* file){
   //TODO: Andrew
   // chunk the file into 984 bytes each and and 16 bytes header: the order will be: sequence#[4 bytes], fileSize[8 bytes], length[4 bytes], payload[984 bytes]
   // create window based on chunks
-
-
-
 	//PART 1: Parsing file into Char Segments
 	size_t PAYLOAD;
 	if(test==false)
@@ -50,20 +51,20 @@ window_t window(FILE* file){
 	else
 		PAYLOAD = 10;
 	char *source = NULL; //create one string of the data which is to be parsed into an array of strings
-	
+
 	fseek(file, 0L, SEEK_END); //go to the end of the file
 	int fileSize = ftell(file); //retrieve the size of the file
 	source = malloc(sizeof(char)*(fileSize + 1)); //Allocate memory for the source String
 
-	
+
 	fseek(file, 0L, SEEK_SET); //go back to front of file
-	
+
 
 	size_t sourceLength = fread(source, sizeof(char), fileSize, file);	//read the file into source
 	source[sourceLength] = '\0';
-	
 
-	char** segments;	
+
+	char** segments;
 	size_t segmentCount = sourceLength/PAYLOAD; 	//retrieve the number of segments
 	if ( sourceLength % PAYLOAD > 0){
 		segmentCount += 1;			//adds another segment for an incomplete payload
@@ -78,18 +79,18 @@ window_t window(FILE* file){
 	int iter = 0;
 
 	for ( i=0; i < segmentCount; i++){				//for all segments
-		
+
 		while (count < PAYLOAD && iter < sourceLength){		//while the specific segement is less then payload and the iterator is less then entire file size
 			segments[i][count] = source[iter];		//fill out the segment
 			count++;
 			iter++;
 		}
-		segments[i][count] = '\0'; 
+		segments[i][count] = '\0';
 		count = 0;
-		
+
 	}
 
-	
+
 
 	//PART 2: Construct Window
 	window_t win = malloc (sizeof(int)*4 + sizeof(int*) + sizeof(char**));	//allocate memory for widow
@@ -102,7 +103,7 @@ window_t window(FILE* file){
  	win->nextToSend = 0; // the first 0 receive
 	win->segmentCount = segmentCount; // the first 0 receive
 	printf( "window() constructor\n-------------\nfileSource: %s\nStart Index: %d\nSegmentCount: %d\nWindow Length: %d\n\n\n",source, win->startIndex,win->segmentCount,win->windowLength );
-	free(source);  	
+	free(source);
 	return win;
 
 
@@ -114,13 +115,37 @@ void printWindow(window_t window){
 	printf("---------------------------\n");
 	int i;
 	for ( i=0; i < window->segmentCount; i++){				//for all segments
-		printf("%04d | --%d-- | %s\n", i, window->acked[i], window->segments[i]);	
+		printf("%04d | --%d-- | %s\n", i, window->acked[i], window->segments[i]);
 	}
 }
 
 void updateOnAcked(window_t window, int ack){
   // TODO: Victor
   // Consider the situation when in the end of transfer
+  // Not checking if the receiving ack is corrupted or not, assume all the packet it received is corrected
+  window.acked[ack] = 2;
+  // Check the threshhold
+  if(ssthresh >= window.windowLength)
+  {
+    // slow start
+    printf('Adpoting Slow Start Algorithm, Current Window Size: %d \n',window.windowLength)
+    windowLength++;
+  }else{
+    if (window.endRTTCommand == ack){
+      // congestion avoidence.
+      printf('Adpoting Congestion Avoidence Algorithm, Current Window Size: %d \n',window.windowLength)
+      windowLength++;
+    }
+  }
+    // keep using the slow start, update all the window properties
+    // update startIndex:
+  while(acked[window.startIndex] == 2)
+  {
+    window.startIndex++;
+  }
+  while(acked[window.nextToSend] !=0){
+    window.nextToSend ++;
+  }
 }
 
 void timeOutHandler(window_t window){
@@ -131,6 +156,21 @@ void timeOutHandler(window_t window){
 int* prepareToSend(window_t window){
   // TODO: Victor
   // Consider the situation when in the end of transfer
+  // calculate nums of the packet sending in this round first, then allocate the new packet.
+  int size  = window.startIndex + window.windowLength - window.nextToSend
+  if (size <= 0){
+    printf('no sending anything this round');
+    return null;
+  }
+  int* command;
+  command = (int *) malloc(size*sizeof(int));
+  // put the command index in the command array.
+  int i = 0;
+  while(i < size){
+    command[i] = window.acked[window.nextToSend+i];
+    i++
+  }
+  return command;
 }
 
 void sendPacket(window_t window, int* command, int sock, const struct sockaddr* cli_addr, socklen_t clilen){
@@ -147,7 +187,7 @@ void sendPacket(window_t window, int* command, int sock, const struct sockaddr* 
 	ptr++;
 	free(buffer);
     }
-    
+
 }
 
 FILE* findFile (char* c){
@@ -190,15 +230,15 @@ void error(char *msg)
 
 int main(int argc, char *argv[])
 {
-    
+
     int sockfd, newsockfd, cwnd_length, portno, pid;
     float ploss, pcorr;
     char* tail;
     char* hi = "Received your message";
-	
+
     socklen_t clilen;
-   struct sockaddr_in serv_addr, cli_addr;		
-   
+   struct sockaddr_in serv_addr, cli_addr;
+
 
     if (argc < 5 && argc!=2) {
         fprintf(stderr,"ERROR, proper use: ./sender <port number> <cwnd> <p_loss> <p_corrupt>\n");
@@ -236,21 +276,21 @@ int main(int argc, char *argv[])
 
 
    char* testInput;
-   
+
    if (test==false){		//if not a test, read socket input into buffer
 	while (1) {
 		int n;
         	char buffer[256];
 
        	 	bzero(buffer, 256);
-       		 n = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr*) &cli_addr, (socklen_t *) &clilen); //ANDREW CHANGE #3: casted &cli_addr to (struct sockaddr *) 
+       		 n = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr*) &cli_addr, (socklen_t *) &clilen); //ANDREW CHANGE #3: casted &cli_addr to (struct sockaddr *)
         	if (n < 0)
             		error("ERROR reading from socket");
        		 else {
             		// fprintf(stdout, buffer);
            		 requestFile = findFile(buffer);
-     
-			
+
+
            		 break;
            		 // break out the initial round of request
             		// FIXME: if the file is not found, send something to client
@@ -262,16 +302,14 @@ int main(int argc, char *argv[])
 	 testInput = argv[1];
    	 printf( "\n\n\nmain()\n----------\nRequested Filename: %s\n\n\n",testInput);
 	 requestFile = findFile(testInput);
-
-
    }
 
     /* init window */
-	  
+
     //FIRST BURST OF COMMANDS
 
     window_t server_window = window(requestFile); //ANDREW CHANGE #4: Combined the prepareFile() and window() functions into one
-	
+
 	if(test==true){
 	  printWindow(server_window);
 	}
@@ -282,7 +320,7 @@ int main(int argc, char *argv[])
     sendPacket(server_window, lastCommand, sockfd, (struct sockaddr*)&cli_addr, clilen); // first send
     // TODO: free the lastCommand;
     free(lastCommand);
-   
+
     while(1){
       // receving acks from recever:
       int n;
@@ -298,7 +336,7 @@ int main(int argc, char *argv[])
         lastCommand = prepareToSend(server_window);
         sendPacket(server_window, lastCommand, sockfd, (struct sockaddr*) &cli_addr, clilen);
         //TODO: free the lastCommand
-         free(lastCommand);
+        free(lastCommand);
       }
     }
     return 0; /* we never get here */
