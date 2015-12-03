@@ -18,7 +18,7 @@
 #include <strings.h>
 
 const int MSS = 1000;
-const int MAX_PAYLOAD = 984;
+const int MAX_PAYLOAD = 10;
 
 void doSomething( char* filename, int sock, struct sockaddr_in serv_addr);
 
@@ -70,7 +70,8 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-charToSeg(char* c, segment_t seg_t) {
+segment_t charToSeg(char* c){
+	segment_t seg_t = malloc (sizeof(segment));
 	char seqstr[5];
 	char lenstr[5];
 	char fsizestr[9];
@@ -84,29 +85,36 @@ charToSeg(char* c, segment_t seg_t) {
 	fsizestr[8] = '\0';
 
 	int fsize = atoi(fsizestr);
-	char data[fsize];
+	//char data[fsize];
+	seg_t->data = malloc(sizeof(char)*100);
 
-	strncpy(data, ptr + 16, fsize);
+	//strncpy(data, ptr + 16, fsize);
+	//strncpy(seg_t->data, ptr + 16, fsize);
 
 	seg_t->seq = atoi(seqstr);
 	seg_t->len = atoi(lenstr);
 	seg_t->fileSize = fsize;
-	seg_t->data = data;
+	int i;
+	for(i=0;i<seg_t->len; i++){
+		seg_t->data[i]=ptr[i+16];
+	}
+	//seg_t->data = data;
 
 	printf("\nParsing segment complete.\n");
 	printf("Segment sequence #: %d\n", seg_t->seq);
 	printf("Segment data length: %d\n", seg_t->len);
 	printf("Total file size: %d\n", seg_t->fileSize);
 	printf("Data payload: %s\n", seg_t->data);
+	return seg_t;
 
 }
 
 void doSomething(char* filename, int sock, struct sockaddr_in serv_addr){
 	
 	int fileSize = 0;
-	segment_t seg = malloc(sizeof(segment));
+	segment_t seg;// = malloc(sizeof(segment));
 	char* allData;
-	char buffer[256];
+	char buffer[1000];
 	int totalSegmentCount;
 
 	char* data;
@@ -131,14 +139,14 @@ void doSomething(char* filename, int sock, struct sockaddr_in serv_addr){
 	//WHILE FILE IS NOT FULLY TRANSFERRED. 
 	while(!complete) {
 		// Receive message from socket.
-		bzero(buffer, 256);
-		read(sock, buffer, 255);
+		bzero(buffer, 1000);
+		read(sock, buffer, 1000);
 		printf("\nReceived new message! Message: %s\n", buffer);
 
 		data = malloc(984); // allocate space for data
 
 		// parse message
-		charToSeg(buffer, seg);
+		seg = charToSeg(buffer);
 		printf("After return data: %s\n", seg->data);
 
 		// copy data to allocated buffer
@@ -152,6 +160,7 @@ void doSomething(char* filename, int sock, struct sockaddr_in serv_addr){
 		if (!initialized) {
 			printf("\nInitializing!\n");
 			// set the total file size on first segment receive
+			printf("Filesize: %d\n", seg->fileSize);
 			fileSize = seg->fileSize;
 			allData = malloc(fileSize); // allocate space for the whole data
 
