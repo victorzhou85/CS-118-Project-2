@@ -5,6 +5,7 @@ typedef struct segment{
 	int len;
 	int fileSize;
 	char* data;
+	//char data[10];
 } segment, *segment_t;
 
 
@@ -15,5 +16,5 @@ segment_t makeSegment(int seq, int len, int fileSize, char* data);	//allocates m
 char* segToChar(segment_t seg);	//takes in seg, returns char representation
 	//FIXME 2. NEED TO IMPLEMENT
 
-charToSeg(char* c, segment_t seg_t);	//takes in char* and returns a segment_t
+segment_t charToSeg(char* c);	//takes in char* and returns a segment_t
 	//FIXME 3. NEED TO IMPLEMENT
