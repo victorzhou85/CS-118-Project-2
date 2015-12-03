@@ -53,8 +53,8 @@ void makeWindow(FILE* file){
 	//PART 1: Parsing file into Char Segments
   size_t PAYLOAD;
 	if(test==false){
-		//PAYLOAD = 984;			//testing with small payload
-		PAYLOAD = 10;
+		PAYLOAD = 984;			//testing with small payload
+		//PAYLOAD = 10;
 	}
 	else
 		PAYLOAD = 10;
