@@ -20,6 +20,7 @@ typedef enum { false, true } bool;
 #include <stdbool.h>
 
 static int const ssthresh = 5; // FIXME: Do we have to change this?
+static int const timeOut = 5;
 
 bool test=false;
 
@@ -32,6 +33,8 @@ typedef struct window{
   int* acked; // 0: not yet sent; 1: sent but not yet acked; 2: sent
   char** segments;
   int endRTTCommand;
+  int* timer; // keep track the remaining time for each packet before the timeout happens
+  int* resendCommand ;
   // each time the prepareForSend function will update this property, when this ack sequence has been received by the sender, it indicate an RTT has been finished.
   // This property only matters when the congestionAvoidence is finished.
 
@@ -45,7 +48,7 @@ window_t window(FILE* file){
   // chunk the file into 984 bytes each and and 16 bytes header: the order will be: sequence#[4 bytes], fileSize[8 bytes], length[4 bytes], payload[984 bytes]
   // create window based on chunks
 	//PART 1: Parsing file into Char Segments
-	size_t PAYLOAD;
+  size_t PAYLOAD;
 	if(test==false)
 		PAYLOAD = 984;
 	else
@@ -96,13 +99,20 @@ window_t window(FILE* file){
 
 	}
 
-
-
 	//PART 2: Construct Window
 	window_t win = malloc (sizeof(int)*4 + sizeof(int*) + sizeof(char**));	//allocate memory for widow
 	win->acked = malloc(sizeof(int)*segmentCount);
         for (i=0; i < segmentCount; i++)
 		win->acked[i] = 0;
+
+// Victor: additional setting in the window
+  win->timer = malloc(sizeof(int)*SegmentCount); // init timer array
+  for(i = 0; i< SegmentCount; i++){
+    win->timer[i] = timeOut;
+  }
+  win->resendCommand = malloc(sizeof(int)); // single element resending command
+  win->resendCommand[0] = -1;
+
 	win->segments = segments;
 	win->startIndex = 0; // the start of the window.
   	win->windowLength = 1; // starts off at 1
@@ -155,9 +165,20 @@ void updateOnAcked(window_t window, int ack){
   }
 }
 
-void timeOutHandler(window_t window){
+void timeOutHandler(int signum){
   // TODO: Victor
-  //
+  //FIXME: the signal handler function cannot have additional parameter put in, it can only deal with global variable. Might cause problem:
+  int i;
+  for(i = window->startIndex; i<= window->startIndex + window->windowLength; i++){
+    window->timer[i]--;
+    if (window->timer[i] == 0){
+      printf('timeout happends at packet %d \n', window.timer[i]);
+      window->resendCommand[0] = i;
+      //FIXME; call the resend function the resendCommand.
+    }
+  }
+
+  alarm(1);
 }
 
 int* prepareToSend(window_t window){
@@ -237,7 +258,7 @@ void error(char *msg)
 
 int main(int argc, char *argv[])
 {
-
+    signal(SIGALRM, timeOutHandler); // bind the timeOutHandler with the timer object.
     int sockfd, newsockfd, cwnd_length, portno, pid;
     float ploss, pcorr;
     char* tail;
@@ -327,6 +348,7 @@ int main(int argc, char *argv[])
     sendPacket(server_window, lastCommand, sockfd, (struct sockaddr*)&cli_addr, clilen); // first send
     // TODO: free the lastCommand;
     free(lastCommand);
+    alarm(1); // start timming cycle.
 
     while(1){
       // receving acks from recever:
