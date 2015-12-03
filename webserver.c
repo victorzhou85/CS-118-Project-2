@@ -43,6 +43,8 @@ typedef struct window{
 
 window_t window;
 
+bool isFinished();
+
 //ANDREW CHANGE #1: Combined the prepareFile() and window() functions into one
 void makeWindow(FILE* file){
   //TODO: Andrew
@@ -51,8 +53,8 @@ void makeWindow(FILE* file){
 	//PART 1: Parsing file into Char Segments
   size_t PAYLOAD;
 	if(test==false){
-		PAYLOAD = 984;			//testing with small payload
-		//PAYLOAD = 10;
+		//PAYLOAD = 984;			//testing with small payload
+		PAYLOAD = 10;
 	}
 	else
 		PAYLOAD = 10;
@@ -130,11 +132,18 @@ void makeWindow(FILE* file){
 
 void printWindow(){
 	printf("\nprintWindow()\n----------\n");
-	printf("Seq# | State | Segment Data\n");
-	printf("---------------------------\n");
+	printf("Seq# | State | cmwd | next | Segment Data\n");
+	printf("-------------------------------\n");
 	int i;
 	for ( i=0; i < window->segmentCount; i++){				//for all segments
-		printf("%04d | --%d-- | %s\n", i, window->acked[i], window->segments[i]+16);
+		if ((i==window->startIndex || i==window->startIndex + window->windowLength-1) && i==window->nextToSend)
+			printf("%04d | --%d-- |******|  XX  | %s \n", i, window->acked[i], window->segments[i]+16);
+		else if (i==window->startIndex || i==window->startIndex + window->windowLength-1)
+			printf("%04d | --%d-- |******|      | %s \n", i, window->acked[i], window->segments[i]+16);
+		else if (i==window->nextToSend)
+			printf("%04d | --%d-- |      |  XX  | %s \n", i, window->acked[i], window->segments[i]+16);
+		else
+			printf("%04d | --%d-- |      |      | %s \n", i, window->acked[i], window->segments[i]+16);
 
 	}
 }
@@ -145,33 +154,59 @@ void updateOnAcked(int ack){
   // Not checking if the receiving ack is corrupted or not, assume all the packet it received is corrected
 	printf("\n-----------\nReceiving ACK\n-----------\n");
 	printf("ACK : %d\n", ack);
-  window->acked[ack] = 2;
+  	window->acked[ack] = 2;
   // Check the threshhold
-  if(ssthresh >= window->windowLength)
+  if(isFinished()==false)//ssthresh >= window->windowLength)
   {
     // slow start
-    printf("Adpoting Slow Start Algorithm, Current Window Size: %d \n",window->windowLength);
-    window->windowLength++;
-	printf("New window size : %d\n", window->windowLength);
+	printf("Adopting Slow Start Algorithm, Current Window Size: %d \n",window->windowLength);
+	if (window->startIndex + window->windowLength < window->segmentCount ){			//if the windowLength can be increased
+		window->windowLength++;
+		printf("New window size : %d\n", window->windowLength);
+   	} 
+	else{
+		printf("Window size cannot be increased. At end of sequence array\n ");
+	}
   }
-   else{
-    if (window->endRTTCommand == ack){
+  else{
+	if (window->endRTTCommand == ack){
       // congestion avoidence.
-      printf("Adpoting Congestion Avoidence Algorithm, Current Window Size: %d \n",window->windowLength);
-      window->windowLength++;
-    }
+		printf("Adopting Congestion Avoidence Algorithm, Current Window Size: %d \n",window->windowLength);
+		if (window->startIndex + window->windowLength < window->segmentCount ){	
+			window->windowLength++;
+			printf("New window size : %d\n", window->windowLength);
+		} 
+     	else{
+		printf("Window size cannot be increased. At end of sequence array\n ");
+  	}
   }
     // keep using the slow start, update all the window properties
     // update startIndex:
   while(window->acked[window->startIndex] == 2)
   {
-    window->startIndex++;
+	if (window->startIndex  + window->windowLength < window->segmentCount ){
+    		window->startIndex++;
+		  if ( window->acked[window->startIndex+1] != 2)
+		  	printf("New start index : %d\n", window->startIndex);
+	}
+	else {
+		printf("Start index cannot be increased. At end of sequence array\n");
+		break;
+	}
   }
-  printf("New start index : %d\n", window->startIndex);
+
   while(window->acked[window->nextToSend] !=0){
-    window->nextToSend ++;
+	if (window -> nextToSend + 1 < window->segmentCount){
+    		window->nextToSend ++;
+		printf("New next to send : %d\n\n", window->nextToSend);
+	}
+	else{
+		printf("No more segments to send \n\n");
+		break;
+	}
   }
-   printf("New next to send : %d\n\n", window->nextToSend);
+   
+}
 }
 
 void timeOutHandler(int signum){
@@ -181,7 +216,7 @@ void timeOutHandler(int signum){
   for(i = window->startIndex; i<= window->startIndex + window->windowLength; i++){
     window->timer[i]--;
     if (window->timer[i] == 0){
-      printf("timeout happends at packet %d \n", window->timer[i]);
+      printf("timeout happens at packet %d \n", window->timer[i]);
       window->resendCommand[0] = i;
       //FIXME; call the resend function the resendCommand.
     }
@@ -198,7 +233,7 @@ int* prepareToSend(int* commandLength){
   int size  = window->startIndex + window->windowLength - window->nextToSend;
 	printf("\n-----------\nSending Segment\n-----------\n");
 	printf("Size to send : %d\n", size);
-  *commandLength = size;	//record the size of the command
+
   if (size <= 0){
     printf("no sending anything this round\n");
     return NULL;
@@ -208,13 +243,22 @@ int* prepareToSend(int* commandLength){
   // put the command index in the command array.
   printf("Next to send : %d\n", window->nextToSend);
   int i = 0;
+  int count = 0;
   while(i < size){
     //command[i] = window->acked[window->nextToSend+i];
-    command[i] = window->nextToSend+i;
-    printf("Preparing to send segment : %d\n", command[i]);
-    i++;
+  	 if (window->acked[window->nextToSend+i]==0){
+		 command[count] = window->nextToSend+i;
+		 count++;
+		 i++;
+	}
+	else {
+		i++;
+
+	}
+   
     
   }
+    *commandLength = count;	//record the size of the command
 	
   return command;
 }
@@ -231,6 +275,8 @@ void sendPacket(int* command, int commandLength, int sock, const struct sockaddr
 	 printf("Sending segment : %d\n", command[i]);
 	sendto(sock,window->segments[j],1000,0,cli_addr,(socklen_t) clilen);
   	window->acked[j]=1;
+	if (window->nextToSend == window->segmentCount-1)
+		window->nextToSend++;
 	//ptr++;
 
     }
@@ -249,6 +295,18 @@ FILE* findFile (char* c){
 
   return f;
 }
+
+bool isFinished(){
+	if (window->startIndex + window->windowLength < window->segmentCount -1)
+		return false;								//not finished yet
+	int i;
+	for (i=0; i< window->windowLength; i++){
+		if (window->acked[window->startIndex+i] < 2)
+			return false;
+	}
+	return true;
+}
+
 
 #include <stdio.h>
 #include <sys/types.h>   // definitions of a number of data types used in socket.h and netinet/in.h
@@ -368,20 +426,21 @@ int main(int argc, char *argv[])
 	
     int commandLength;	//single pointer to a single integer that saves the length of lastCommand()
     int* lastCommand = prepareToSend(&commandLength);
-   if (1){
+	printf( "Preparing to send\n{ ");
 	 int p=0;
 	for (p=0; p < commandLength; p++){
-		printf( "command[%d]: Seq# %d\n\n\n", p, lastCommand[p]);
-		p++;
+		if (p == commandLength - 1)
+			printf( "%d }\n",lastCommand[p]);
+		else
+			printf( "%d, ",lastCommand[p]);
 	}
-   }
-    sendPacket(lastCommand, commandLength, sockfd, (struct sockaddr*)&cli_addr, clilen); // first send
-    // TODO: free the lastCommand;
-    free(lastCommand);
-   // if(test==true){
-	if(1){
-	  printWindow();
-	}	
+	sendPacket(lastCommand, commandLength, sockfd, (struct sockaddr*)&cli_addr, clilen); // first send
+        // TODO: free the lastCommand;
+
+        free(lastCommand);
+	commandLength=0;
+	printWindow();
+		
     alarm(1); // start timming cycle.
 	
     while(1){
@@ -400,18 +459,32 @@ int main(int argc, char *argv[])
         updateOnAcked(ack);
 
 	 printWindow();
+	if (isFinished()){
+		printf( "Send complete! \n\n");
+		break;
+	}
 	 
         lastCommand = prepareToSend(&commandLength);
-	printf( "CommandLength: %d\n", commandLength);
-	int p=0;
-	for (p=0; p < commandLength; p++){
-		printf( "command[%d]: Seq# %d\n", p, lastCommand[p]);
-	}
-	
-        sendPacket(lastCommand, commandLength, sockfd, (struct sockaddr*) &cli_addr, clilen);
+	if(commandLength>0){
+		printf( "Preparing to send:\n{ ");
+		 int p=0;
+		for (p=0; p < commandLength; p++){
+			if (p == commandLength - 1)
+				printf( "%d }\n",lastCommand[p]);
+			else
+				printf( "%d, ",lastCommand[p]);
+		}
+		sendPacket(lastCommand, commandLength, sockfd, (struct sockaddr*)&cli_addr, clilen); // first send
+        	// TODO: free the lastCommand;
+        	
+   	}
+	 else
+		printf( "Nothing to Send \n\n");
 	 printWindow();
+	free(lastCommand);
+	 commandLength=0;
         //TODO: free the lastCommand
-        free(lastCommand);
+        // free(lastCommand);
       }
     }
     return 0; /* we never get here */
