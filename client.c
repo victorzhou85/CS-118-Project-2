@@ -18,7 +18,7 @@
 #include <strings.h>
 
 const int MSS = 1000;
-const int MAX_PAYLOAD = 5;
+const int MAX_PAYLOAD = 984;
 
 void doSomething( char* filename, int sock, struct sockaddr_in serv_addr);
 
@@ -115,7 +115,7 @@ void doSomething(char* filename, int sock, struct sockaddr_in serv_addr){
 	bool received[6000];
 	int nextExpected = 0;
 
-	FILE* fp = fopen(filename, "w");
+	FILE* fp = fopen("recieve", "w");
 	int pos = 0;
 
 	// FIRST SEND THE FILENAME AS A REQUEST
