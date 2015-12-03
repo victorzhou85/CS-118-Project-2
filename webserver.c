@@ -72,19 +72,25 @@ window_t window(FILE* file){
 	segments = malloc(sizeof(char*)*segmentCount);	//allocate data for segment string
 	int i;
 	for ( i=0; i < segmentCount; i++){
-		segments[i] = malloc(sizeof(char)*PAYLOAD);		//allocate data for each individual segment
+		segments[i] = malloc(sizeof(char)*(PAYLOAD+16));		//allocate data for each individual segment
 	}
 	int count = 0;
 	int iter = 0;
+	int dataLen = 0;
 
 	for ( i=0; i < segmentCount; i++){				//for all segments
-		
+		dataLen = PAYLOAD;					//len of data = PAYLOAD size
+		if (sourceLength - iter < PAYLOAD)
+			dataLen = sourceLength - iter;			
+		sprintf(segments[i],"%04d",i);		//segment starts with sequence number
+		sprintf(segments[i]+4,"%04d",dataLen);	//append the size of the payload
+		sprintf(segments[i]+8,"%08d",fileSize);	//leave a gap for len and append fileSize
 		while (count < PAYLOAD && iter < sourceLength){		//while the specific segement is less then payload and the iterator is less then entire file size
-			segments[i][count] = source[iter];		//fill out the segment
+			segments[i][count+16] = source[iter];		//fill out the data
 			count++;
 			iter++;
 		}
-		segments[i][count] = '\0'; 
+		segments[i][count+16] = '\0'; 
 		count = 0;
 		
 	}
@@ -101,7 +107,7 @@ window_t window(FILE* file){
   	win->windowLength = 1; // starts off at 1
  	win->nextToSend = 0; // the first 0 receive
 	win->segmentCount = segmentCount; // the first 0 receive
-	printf( "window() constructor\n-------------\nfileSource: %s\nStart Index: %d\nSegmentCount: %d\nWindow Length: %d\n\n\n",source, win->startIndex,win->segmentCount,win->windowLength );
+	printf( "window() constructor\n-------------\nfileSource: %s\nStart Index: %d\nSegmentCount: %d\ncmwd: %d\n\n\n",source, win->startIndex,win->segmentCount,win->windowLength );
 	free(source);  	
 	return win;
 
@@ -114,7 +120,7 @@ void printWindow(window_t window){
 	printf("---------------------------\n");
 	int i;
 	for ( i=0; i < window->segmentCount; i++){				//for all segments
-		printf("%04d | --%d-- | %s\n", i, window->acked[i], window->segments[i]);	
+		printf("%04d | --%d-- | %s\n", i, window->acked[i], window->segments[i]+16);	
 	}
 }
 
