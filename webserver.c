@@ -41,9 +41,10 @@ typedef struct window{
 
 }* window_t;
 
+window_t window;
 
 //ANDREW CHANGE #1: Combined the prepareFile() and window() functions into one
-window_t window(FILE* file){
+void makeWindow(FILE* file){
   //TODO: Andrew
   // chunk the file into 984 bytes each and and 16 bytes header: the order will be: sequence#[4 bytes], fileSize[8 bytes], length[4 bytes], payload[984 bytes]
   // create window based on chunks
@@ -100,32 +101,32 @@ window_t window(FILE* file){
 	}
 
 	//PART 2: Construct Window
-	window_t win = malloc (sizeof(int)*4 + sizeof(int*) + sizeof(char**));	//allocate memory for widow
-	win->acked = malloc(sizeof(int)*segmentCount);
+	window = malloc (sizeof(int)*5 + sizeof(int*)*3 + sizeof(char**));	//allocate memory for widow
+	window->acked = malloc(sizeof(int)*segmentCount);
         for (i=0; i < segmentCount; i++)
-		win->acked[i] = 0;
+		window->acked[i] = 0;
 
 // Victor: additional setting in the window
-  win->timer = malloc(sizeof(int)*SegmentCount); // init timer array
-  for(i = 0; i< SegmentCount; i++){
-    win->timer[i] = timeOut;
+  window->timer = malloc(sizeof(int)*segmentCount); // init timer array
+  for(i = 0; i< segmentCount; i++){
+    window->timer[i] = timeOut;
   }
-  win->resendCommand = malloc(sizeof(int)); // single element resending command
-  win->resendCommand[0] = -1;
+  window->resendCommand = malloc(sizeof(int)); // single element resending command
+  window->resendCommand[0] = -1;
 
-	win->segments = segments;
-	win->startIndex = 0; // the start of the window.
-  	win->windowLength = 1; // starts off at 1
- 	win->nextToSend = 0; // the first 0 receive
-	win->segmentCount = segmentCount; // the first 0 receive
-	printf( "window() constructor\n-------------\nfileSource: %s\nStart Index: %d\nSegmentCount: %d\ncmwd: %d\n\n\n",source, win->startIndex,win->segmentCount,win->windowLength );
+	window->segments = segments;
+	window->startIndex = 0; // the start of the window.
+  	window->windowLength = 1; // starts off at 1
+ 	window->nextToSend = 0; // the first 0 receive
+	window->segmentCount = segmentCount; // the first 0 receive
+	printf( "makeWindow() constructor\n-------------\nfileSource: %s\nStart Index: %d\nSegmentCount: %d\ncmwd: %d\n\n\n",source, window->startIndex,window->segmentCount,window->windowLength );
 	free(source);
-	return win;
+	//return win;
 
 
 }
 
-void printWindow(window_t window){
+void printWindow(){
 	printf("printWindow()\n----------\n");
 	printf("Seq# | State | Segment Data\n");
 	printf("---------------------------\n");
@@ -136,32 +137,33 @@ void printWindow(window_t window){
 	}
 }
 
-void updateOnAcked(window_t window, int ack){
+void updateOnAcked(int ack){
   // TODO: Victor
   // Consider the situation when in the end of transfer
   // Not checking if the receiving ack is corrupted or not, assume all the packet it received is corrected
-  window.acked[ack] = 2;
+  window->acked[ack] = 2;
   // Check the threshhold
-  if(ssthresh >= window.windowLength)
+  if(ssthresh >= window->windowLength)
   {
     // slow start
-    printf('Adpoting Slow Start Algorithm, Current Window Size: %d \n',window.windowLength)
-    windowLength++;
-  }else{
-    if (window.endRTTCommand == ack){
+    printf("Adpoting Slow Start Algorithm, Current Window Size: %d \n",window->windowLength);
+    window->windowLength++;
+  }
+   else{
+    if (window->endRTTCommand == ack){
       // congestion avoidence.
-      printf('Adpoting Congestion Avoidence Algorithm, Current Window Size: %d \n',window.windowLength)
-      windowLength++;
+      printf("Adpoting Congestion Avoidence Algorithm, Current Window Size: %d \n",window->windowLength);
+      window->windowLength++;
     }
   }
     // keep using the slow start, update all the window properties
     // update startIndex:
-  while(acked[window.startIndex] == 2)
+  while(window->acked[window->startIndex] == 2)
   {
-    window.startIndex++;
+    window->startIndex++;
   }
-  while(acked[window.nextToSend] !=0){
-    window.nextToSend ++;
+  while(window->acked[window->nextToSend] !=0){
+    window->nextToSend ++;
   }
 }
 
@@ -172,7 +174,7 @@ void timeOutHandler(int signum){
   for(i = window->startIndex; i<= window->startIndex + window->windowLength; i++){
     window->timer[i]--;
     if (window->timer[i] == 0){
-      printf('timeout happends at packet %d \n', window.timer[i]);
+      printf("timeout happends at packet %d \n", window->timer[i]);
       window->resendCommand[0] = i;
       //FIXME; call the resend function the resendCommand.
     }
@@ -181,38 +183,42 @@ void timeOutHandler(int signum){
   alarm(1);
 }
 
-int* prepareToSend(window_t window){
+int* prepareToSend(int* commandLength){
   // TODO: Victor
   // Consider the situation when in the end of transfer
   // calculate nums of the packet sending in this round first, then allocate the new packet.
-  int size  = window.startIndex + window.windowLength - window.nextToSend
+  
+  int size  = window->startIndex + window->windowLength - window->nextToSend;
+  *commandLength = size;	//record the size of the command
   if (size <= 0){
-    printf('no sending anything this round');
-    return null;
+    printf("no sending anything this round\n");
+    return NULL;
   }
   int* command;
   command = (int *) malloc(size*sizeof(int));
   // put the command index in the command array.
   int i = 0;
   while(i < size){
-    command[i] = window.acked[window.nextToSend+i];
-    i++
+    command[i] = window->acked[window->nextToSend+i];
+    i++;
   }
+	
   return command;
 }
 
-void sendPacket(window_t window, int* command, int sock, const struct sockaddr* cli_addr, socklen_t clilen){
+void sendPacket(int* command, int commandLength, int sock, const struct sockaddr* cli_addr, socklen_t clilen){
   // TODO: Andrew
   // send pack according to command
   // udpate the window after we sent
-    int* ptr = command;
+    //int* ptr = command;
     char* buffer;
     buffer = malloc(sizeof(char*) * 1000);	//allocate 1000 byte sized buffer
-    while (ptr!=NULL){
-	int i=*ptr;
-	sendto(sock,window->segments[i],1000,0,cli_addr,(socklen_t) clilen);
-  	window->acked[i]=1;
-	ptr++;
+    int i; 
+    for( i = 0; i < commandLength; i++){
+	int j = command[i];
+	sendto(sock,window->segments[j],1000,0,cli_addr,(socklen_t) clilen);
+  	window->acked[j]=1;
+	//ptr++;
 	free(buffer);
     }
 
@@ -336,34 +342,48 @@ int main(int argc, char *argv[])
 
     //FIRST BURST OF COMMANDS
 
-    window_t server_window = window(requestFile); //ANDREW CHANGE #4: Combined the prepareFile() and window() functions into one
+    //window_t server_window = window(requestFile); //ANDREW CHANGE #4: Combined the prepareFile() and window() functions into one
 
+	makeWindow(requestFile);		//allocate and construct window
 	if(test==true){
-	  printWindow(server_window);
+	  printWindow();
 	}
 
     //FIXME: Not sure if anything missing
-
-    int* lastCommand = prepareToSend(server_window);
-    sendPacket(server_window, lastCommand, sockfd, (struct sockaddr*)&cli_addr, clilen); // first send
+	
+	
+    int commandLength;	//single pointer to a single integer that saves the length of lastCommand()
+    int* lastCommand = prepareToSend(&commandLength);
+   if (test==true){
+	 int p=0;
+	for (p=0; p < commandLength; p++){
+		printf( "command[%d]: Seq# %d\n\n\n", p, lastCommand[0]);
+		p++;
+	}
+   }
+    sendPacket(lastCommand, commandLength, sockfd, (struct sockaddr*)&cli_addr, clilen); // first send
     // TODO: free the lastCommand;
     free(lastCommand);
+    if(test==true){
+	  printWindow();
+	}	
     alarm(1); // start timming cycle.
-
+	
     while(1){
       // receving acks from recever:
       int n;
       char buffer[256]; // buffer for acks
       bzero(buffer, 256);
+	 printf( "Checkpoint!\n\n");
       n = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr*)&cli_addr, (socklen_t *) &clilen);
       if (n < 0)
           error("ERROR reading from socket");
       else {
         int ack = 0;
         // TODO: parse the acks from buffer:
-        updateOnAcked(server_window, ack);
-        lastCommand = prepareToSend(server_window);
-        sendPacket(server_window, lastCommand, sockfd, (struct sockaddr*) &cli_addr, clilen);
+        updateOnAcked(ack);
+        lastCommand = prepareToSend(&commandLength);
+        sendPacket(lastCommand, commandLength, sockfd, (struct sockaddr*) &cli_addr, clilen);
         //TODO: free the lastCommand
         free(lastCommand);
       }
