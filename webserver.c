@@ -18,12 +18,21 @@ typedef enum { false, true } bool;
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <stdbool.h>
+#include <time.h>
 
 static int const ssthresh = 5; // FIXME: Do we have to change this?
 static int const timeOut = 5;
 
 bool test=false;
+bool resend = false;	//turns true during timeout
+float ploss=0;
+float pcorr=0;
 
+
+//socket metadata
+ int sockfd;
+ socklen_t clilen;
+ struct sockaddr_in serv_addr, cli_addr;
 
 typedef struct window{
   int startIndex; // the start of the window.
@@ -45,13 +54,15 @@ window_t window;
 
 bool isFinished();
 
+void sendPacket(int* command, int commandLength, int sock, const struct sockaddr* cli_addr, socklen_t clilen);
+
 //ANDREW CHANGE #1: Combined the prepareFile() and window() functions into one
 void makeWindow(FILE* file){
   //TODO: Andrew
   // chunk the file into 984 bytes each and and 16 bytes header: the order will be: sequence#[4 bytes], fileSize[8 bytes], length[4 bytes], payload[984 bytes]
   // create window based on chunks
 	//PART 1: Parsing file into Char Segments
-  size_t PAYLOAD;
+	size_t PAYLOAD;
 	if(test==false){
 		PAYLOAD = 984;			//testing with small payload
 		//PAYLOAD = 10;
@@ -110,13 +121,13 @@ void makeWindow(FILE* file){
         for (i=0; i < segmentCount; i++)
 		window->acked[i] = 0;
 
-// Victor: additional setting in the window
-  window->timer = malloc(sizeof(int)*segmentCount); // init timer array
-  for(i = 0; i< segmentCount; i++){
-    window->timer[i] = timeOut;
-  }
-  window->resendCommand = malloc(sizeof(int)); // single element resending command
-  window->resendCommand[0] = -1;
+	// Victor: additional setting in the window
+	window->timer = malloc(sizeof(int)*segmentCount); // init timer array
+	for(i = 0; i< segmentCount; i++){
+		window->timer[i] = timeOut;
+	}
+	window->resendCommand = malloc(sizeof(int)); // single element resending command
+	window->resendCommand[0] = -1;
 
 	window->segments = segments;
 	window->startIndex = 0; // the start of the window.
@@ -154,75 +165,117 @@ void updateOnAcked(int ack){
   // Not checking if the receiving ack is corrupted or not, assume all the packet it received is corrected
 	printf("\n-----------\nReceiving ACK\n-----------\n");
 	printf("ACK : %d\n", ack);
-  	window->acked[ack] = 2;
-  // Check the threshhold
-  if(isFinished()==false)//ssthresh >= window->windowLength)
-  {
-    // slow start
-	printf("Adopting Slow Start Algorithm, Current Window Size: %d \n",window->windowLength);
-	if (window->startIndex + window->windowLength < window->segmentCount ){			//if the windowLength can be increased
-		window->windowLength++;
-		printf("New window size : %d\n", window->windowLength);
-   	} 
-	else{
-		printf("Window size cannot be increased. At end of sequence array\n ");
-	}
-  }
-  else{
-	if (window->endRTTCommand == ack){
-      // congestion avoidence.
-		printf("Adopting Congestion Avoidence Algorithm, Current Window Size: %d \n",window->windowLength);
-		if (window->startIndex + window->windowLength < window->segmentCount ){	
-			window->windowLength++;
-			printf("New window size : %d\n", window->windowLength);
-		} 
-     	else{
-		printf("Window size cannot be increased. At end of sequence array\n ");
-  	}
-  }
-    // keep using the slow start, update all the window properties
-    // update startIndex:
-  while(window->acked[window->startIndex] == 2)
-  {
-	if (window->startIndex  + window->windowLength < window->segmentCount ){
-    		window->startIndex++;
-		  if ( window->acked[window->startIndex+1] != 2)
-		  	printf("New start index : %d\n", window->startIndex);
-	}
-	else {
-		printf("Start index cannot be increased. At end of sequence array\n");
-		break;
-	}
-  }
+	if (window->acked[ack]==1){
+  		window->acked[ack] = 2;
+ 		 // Check the threshhold
+ 		 if(isFinished()==false)//ssthresh >= window->windowLength)
+ 		 {
+    			// slow start
+			printf("Adopting Slow Start Algorithm, Current Window Size: %d \n",window->windowLength);
+			if (window->startIndex + window->windowLength < window->segmentCount ){			//if the windowLength can be increased
+				window->windowLength++;
+				printf("New window size : %d\n", window->windowLength);
+   			} 
+			else{
+				printf("Window size cannot be increased. At end of sequence array\n ");
+			}
+  		}
+ 		else{
+			if (window->endRTTCommand == ack){
+     			 // congestion avoidence.
+				printf("Adopting Congestion Avoidence Algorithm, Current Window Size: %d \n",window->windowLength);
+				if (window->startIndex + window->windowLength < window->segmentCount ){	
+					window->windowLength++;
+					printf("New window size : %d\n", window->windowLength);
+				} 
+			}
+     			else{
+				printf("Window size cannot be increased. At end of sequence array\n ");
+  			}
+ 		 }
+    		// keep using the slow start, update all the window properties
+    		// update startIndex:
+  		while(window->acked[window->startIndex] == 2)
+  		{
+			if (window->startIndex  + window->windowLength < window->segmentCount ){
+    				window->startIndex++;
+		 		 if ( window->acked[window->startIndex+1] != 2)
+		  			printf("New start index : %d\n", window->startIndex);
+			}
+			else {
+				printf("Start index cannot be increased. At end of sequence array\n");
+				break;
+			}
+  		}
 
-  while(window->acked[window->nextToSend] !=0){
-	if (window -> nextToSend + 1 < window->segmentCount){
-    		window->nextToSend ++;
-		printf("New next to send : %d\n\n", window->nextToSend);
+ 		 while(window->acked[window->nextToSend] !=0){
+			if (window -> nextToSend + 1 < window->segmentCount){
+    				window->nextToSend ++;
+				printf("New next to send : %d\n\n", window->nextToSend);
+			}
+			else{
+				printf("No more segments to send \n\n");
+				break;
+			}
+ 		 }
+   
+		
 	}
 	else{
-		printf("No more segments to send \n\n");
-		break;
+		printf("ACK %d is outside of cmwd. Throwing away ack.\n", ack);
 	}
-  }
-   
 }
+
+void retransmit(int i, int sock, const struct sockaddr* cli_addr, socklen_t clilen){
+	int j;
+	for(j = i; j< window->startIndex + window->windowLength; j++){
+		window->acked[j] = 0;
+		window->timer[j] = timeOut;
+	}
+	window->nextToSend = i;
+	window->startIndex =i;
+	window->windowLength = 1;
+	printWindow();
+	double r= (rand() % 100) * 1.0 / 100.0;			//random chance of loss!
+	if (r > ploss){
+		printf("Random float : %f\n", r);
+		printf("Retransmitting segment : %d\n", i);
+		int n = sendto(sock,window->segments[i],1000,0,cli_addr,(socklen_t) clilen);
+		if(n<0)
+			printf("problem sending\n");
+		window->acked[i]=1;
+	}
+	else{
+		printf("Random float : %f\n", r);
+		printf("Packet %d sent but loss\n", i);
+	}
+  	
+	if (window->nextToSend == window->segmentCount-1)
+		window->nextToSend++;
+	
+	
+	
 }
+
 
 void timeOutHandler(int signum){
   // TODO: Victor
   //FIXME: the signal handler function cannot have additional parameter put in, it can only deal with global variable. Might cause problem:
-  int i;
-  for(i = window->startIndex; i<= window->startIndex + window->windowLength; i++){
-    window->timer[i]--;
-    if (window->timer[i] == 0){
-      printf("timeout happens at packet %d \n", window->timer[i]);
-      window->resendCommand[0] = i;
-      //FIXME; call the resend function the resendCommand.
-    }
-  }
+	int i;
+	bool resetWindow = false;
+	for(i = window->startIndex; i< window->startIndex + window->windowLength; i++){
+		if (resetWindow == false ){
+			window->timer[i]--;
+			if (window->timer[i] == 0){
+				printf("timeout happens at packet %d \n", i);
+      				//window->resendCommand[count] = i;
+				retransmit(i,sockfd, (struct sockaddr*)&cli_addr, clilen);
+				resetWindow = true; 
+   			 }
+		}
+	}
 
-  alarm(1);
+	alarm(1);
 }
 
 int* prepareToSend(int* commandLength){
@@ -263,17 +316,27 @@ int* prepareToSend(int* commandLength){
   return command;
 }
 
+
 void sendPacket(int* command, int commandLength, int sock, const struct sockaddr* cli_addr, socklen_t clilen){
   // TODO: Andrew
   // send pack according to command
   // udpate the window after we sent
     //int* ptr = command;
 
+    
+
     int i; 
     for( i = 0; i < commandLength; i++){
+	double r = (rand() % 100) * 1.0 / 100.0;		//random chance of loss!
 	int j = command[i];
-	 printf("Sending segment : %d\n", command[i]);
-	sendto(sock,window->segments[j],1000,0,cli_addr,(socklen_t) clilen);
+	if (r > ploss){
+		printf("Random float : %f\n", r);
+		printf("Sending segment : %d\n", command[i]);
+		sendto(sock,window->segments[j],1000,0,cli_addr,(socklen_t) clilen);
+	}
+	else{
+		printf("Packet %d sent but loss\n", command[i]);
+	}
   	window->acked[j]=1;
 	if (window->nextToSend == window->segmentCount-1)
 		window->nextToSend++;
@@ -336,13 +399,14 @@ void error(char *msg)
 int main(int argc, char *argv[])
 {
     signal(SIGALRM, timeOutHandler); // bind the timeOutHandler with the timer object.
-    int sockfd, newsockfd, cwnd_length, portno, pid;
-    float ploss, pcorr;
+   // int sockfd, newsockfd, cwnd_length, portno, pid;
+	int newsockfd, cwnd_length, portno, pid;
+    //float ploss, pcorr;
     char* tail;
     char* hi = "Received your message";
 
-    socklen_t clilen;
-   struct sockaddr_in serv_addr, cli_addr;
+   // socklen_t clilen;
+   //struct sockaddr_in serv_addr, cli_addr;
 
 
     if (argc < 5 && argc!=2) {
@@ -366,6 +430,11 @@ int main(int argc, char *argv[])
 
     ploss = strtof(argv[3], &tail);
     pcorr = strtof(argv[4], &tail);
+
+    printf( "Probability of Loss: %f\n",ploss);
+    printf( "Probability of Corruption: %f\n\n", pcorr);
+
+	
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
@@ -394,13 +463,10 @@ int main(int argc, char *argv[])
        		 else {
             		// fprintf(stdout, buffer);
            		 requestFile = findFile(buffer);
-
-
            		 break;
            		 // break out the initial round of request
             		// FIXME: if the file is not found, send something to client
        		 }
-
    	 } /* end of while */
    }
    else{		//if a test, read "test" into buffer
@@ -412,9 +478,6 @@ int main(int argc, char *argv[])
     /* init window */
 
     //FIRST BURST OF COMMANDS
-
-    //window_t server_window = window(requestFile); //ANDREW CHANGE #4: Combined the prepareFile() and window() functions into one
-
 	makeWindow(requestFile);		//allocate and construct window
 	//if(test==true){
 	if(1){
@@ -444,6 +507,18 @@ int main(int argc, char *argv[])
     alarm(1); // start timming cycle.
 	
     while(1){
+      //if timeout, resend
+	if(resend == true){
+		printf( "About to resend\n");
+		lastCommand = prepareToSend(&commandLength);
+		if(commandLength>0){
+			printf( "Preparing to resend:\n{ ");
+			printf( "%d }\n",lastCommand[0]);
+			sendPacket(lastCommand, commandLength, sockfd, (struct sockaddr*)&cli_addr, clilen); 
+		}
+		free(lastCommand);
+		resend=false;
+	}
       // receving acks from recever:
       int n;
       char buffer[256]; // buffer for acks
