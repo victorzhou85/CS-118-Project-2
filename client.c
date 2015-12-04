@@ -18,7 +18,7 @@
 #include <strings.h>
 
 const int MSS = 1000;
-const int MAX_PAYLOAD = 10;
+const int MAX_PAYLOAD = 984;
 
 void doSomething( char* filename, int sock, struct sockaddr_in serv_addr);
 
@@ -86,7 +86,7 @@ segment_t charToSeg(char* c){
 
 	int fsize = atoi(fsizestr);
 	//char data[fsize];
-	seg_t->data = malloc(sizeof(char)*100);
+	seg_t->data = malloc(sizeof(char)*984);
 
 	//strncpy(data, ptr + 16, fsize);
 	//strncpy(seg_t->data, ptr + 16, fsize);
