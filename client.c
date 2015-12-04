@@ -20,7 +20,7 @@
 const int MSS = 1000;
 const int MAX_PAYLOAD = 10;
 
-void doSomething( char* filename, int sock, struct sockaddr_in serv_addr);
+void doSomething( char* filename, int sock, struct sockaddr_in serv_addr, double ploss, double pcorr);
 
 void writeToFile( FILE* file, char* buffer, int offset);
 
@@ -37,14 +37,18 @@ int main(int argc, char *argv[])
     struct sockaddr_in serv_addr;
     struct hostent *server; //contains tons of information, including the server's IP address
     char* filename;	
+    double ploss, pcorr;
+    char* tail;
 
     
-    if (argc < 4) {
-       fprintf(stderr,"usage %s hostname port filename\n", argv[0]);
+    if (argc < 6) {
+       fprintf(stderr,"usage %s hostname port filename ploss pcorr\n", argv[0]);
        exit(0);
     }
     
-   
+    ploss = strtod(argv[4], &tail);
+    pcorr = strtod(argv[5], &tail);
+
     portno = atoi(argv[2]);
     sockfd = socket(AF_INET, SOCK_DGRAM, 0); //create a new socket
     if (sockfd < 0) 
@@ -63,7 +67,7 @@ int main(int argc, char *argv[])
     bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
     serv_addr.sin_port = htons(portno);
     
-    doSomething(filename, sockfd, serv_addr);
+    doSomething(filename, sockfd, serv_addr, ploss, pcorr);
 
     close(sockfd); //close socket
     
@@ -109,13 +113,14 @@ segment_t charToSeg(char* c){
 
 }
 
-void doSomething(char* filename, int sock, struct sockaddr_in serv_addr){
+void doSomething(char* filename, int sock, struct sockaddr_in serv_addr, double ploss, double pcorr){
 	
 	int fileSize = 0;
 	segment_t seg;// = malloc(sizeof(segment));
 	char* allData;
 	char buffer[1000];
 	int totalSegmentCount;
+	bool packetReceived = false;
 
 	char* data;
 	int seq;
@@ -128,10 +133,21 @@ void doSomething(char* filename, int sock, struct sockaddr_in serv_addr){
 
 	// FIRST SEND THE FILENAME AS A REQUEST
 	
-	int n = sendto(sock, filename, strlen(filename), 0, (struct sockaddr_in *) &serv_addr, sizeof(serv_addr)); //write to the socket
-        if (n < 0) 
-             error("ERROR writing to socket");
+	while(!packetReceived) {
+		int n = sendto(sock, filename, strlen(filename), 0, (struct sockaddr_in *) &serv_addr, sizeof(serv_addr)); //write to the socket
+	    if (n < 0)
+	        error("ERROR writing to socket");
 
+	    bzero(buffer, 1000);
+	    read(sock, buffer, 1000);
+
+	    if(strlen(buffer) < 16) {
+			printf("-----------\nReceived corrupt packet! Discarding...\n-----------\n");
+		}
+		else {
+			packetReceived = true;
+		}
+	}
     // PREPARE TO RECEIVE
         
 	bool initialized, complete = false;
@@ -139,11 +155,18 @@ void doSomething(char* filename, int sock, struct sockaddr_in serv_addr){
 	//WHILE FILE IS NOT FULLY TRANSFERRED. 
 	while(!complete) {
 		// Receive message from socket.
-		bzero(buffer, 1000);
-		read(sock, buffer, 1000);
+		if(!packetReceived) {
+			bzero(buffer, 1000);
+			read(sock, buffer, 1000);
+		}
 		printf("\nReceived new message! Message: %s\n", buffer);
 
 		data = malloc(984); // allocate space for data
+
+		if(strlen(buffer) < 16) {
+			printf("-----------\nReceived corrupt packet! Discarding...\n-----------\n");
+			continue;
+		}
 
 		// parse message
 		seg = charToSeg(buffer);
@@ -215,22 +238,34 @@ void doSomething(char* filename, int sock, struct sockaddr_in serv_addr){
 		printf("Writing %d bytes to %d * %d = %d\n", seg->len, seg->seq, MAX_PAYLOAD, pos);
 
 		memcpy(allData + pos, data, seg->len);
-		// fseek(fp, pos, SEEK_SET);
-		// // fwrite(seg->data, 1, seg->len, fp);
-		// char stuff[10] = "higregoryl";
-		// strncpy(stuff, seg->data, seg->len);
-		// stuff[seg->len] = '\0';
-		// fputs(stuff, fp);
-		// fprintf(fp, "%s", seg->data);
-
 
 		// Send ACK for the segment
 		char seqstr[4];
 		sprintf(seqstr, "%d", seg->seq);
 
-		n = sendto(sock, seqstr, strlen(seqstr), 0, (struct sockaddr_in *) &serv_addr, sizeof(serv_addr)); //write to the socket
-	    if (n < 0)
-	         error("ERROR writing to socket");
+		// ploss pcorr
+
+		double r = (rand() % 100) * 1.0 / 100.0;
+		printf("\n\n%f\n\n", r);
+
+		if(r < (1.0 - ploss - pcorr)) {
+			int n = sendto(sock, seqstr, strlen(seqstr), 0, (struct sockaddr_in *) &serv_addr, sizeof(serv_addr)); //write to the socket
+			if (n < 0)
+				error("ERROR writing to socket");
+			}
+		else if(r > (1 - pcorr)) {
+			char corruptPacket[4];
+			sprintf(corruptPacket, "%d", -1);
+			int n = sendto(sock, corruptPacket, strlen(corruptPacket), 0, (struct sockaddr_in *) &serv_addr, sizeof(serv_addr)); //write to the socket
+			if (n < 0)
+				error("ERROR writing to socket");
+			printf("-----------\nPacket corrupted! Sending corrupted packet...\n-----------\n");
+		}
+		else {
+			printf("-----------\nPacket lost...\n-----------\n");
+		}
+
+		packetReceived = false;
 
 		free(seg);
 		free(data);

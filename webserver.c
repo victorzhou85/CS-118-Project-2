@@ -18,6 +18,7 @@ typedef enum { false, true } bool;
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <stdbool.h>
+#include <time.h>
 
 static int const ssthresh = 5; // FIXME: Do we have to change this?
 static int const timeOut = 5;
@@ -149,6 +150,14 @@ void printWindow(){
 }
 
 void updateOnAcked(int ack){
+
+  // on corrupt packed, do not update
+  // instead, just print we received a corrupt ACK
+  if (ack < 0) {
+    printf("Corrupt ACK received! Discarding...\n");
+    return;
+  }
+
   // TODO: Victor
   // Consider the situation when in the end of transfer
   // Not checking if the receiving ack is corrupted or not, assume all the packet it received is corrected
@@ -335,9 +344,11 @@ void error(char *msg)
 
 int main(int argc, char *argv[])
 {
+  /* initialize random seed for rand (ploss pcorr) */
+  srand (time(NULL));
     signal(SIGALRM, timeOutHandler); // bind the timeOutHandler with the timer object.
     int sockfd, newsockfd, cwnd_length, portno, pid;
-    float ploss, pcorr;
+    double ploss, pcorr;
     char* tail;
     char* hi = "Received your message";
 
@@ -364,8 +375,8 @@ int main(int argc, char *argv[])
     portno = atoi(argv[1]);
     cwnd_length = atoi(argv[2]);
 
-    ploss = strtof(argv[3], &tail);
-    pcorr = strtof(argv[4], &tail);
+    ploss = strtod(argv[3], &tail);
+    pcorr = strtod(argv[4], &tail);
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
@@ -474,10 +485,27 @@ int main(int argc, char *argv[])
 			else
 				printf( "%d, ",lastCommand[p]);
 		}
-		sendPacket(lastCommand, commandLength, sockfd, (struct sockaddr*)&cli_addr, clilen); // first send
-        	// TODO: free the lastCommand;
-        	
-   	}
+    // Decide if packet will be lost or corrupted.
+
+
+    double r = (rand() % 100) * 1.0 / 100.0;
+    printf("\n\n%f\n\n", r);
+
+    if(r < (1.0 - ploss - pcorr)) {
+      sendPacket(lastCommand, commandLength, sockfd, (struct sockaddr*)&cli_addr, clilen); // first send
+    }
+    else if(r > (1 - pcorr)) {
+      char corruptPacket[4];
+      sprintf(corruptPacket, "%d", -1);
+      sendto(sockfd, corruptPacket, strlen(corruptPacket), 0, (struct sockaddr*)&cli_addr, (socklen_t) clilen);
+      if (n < 0)
+           error("ERROR writing to socket");
+      printf("-----------\nPacket corrupted! Sending corrupted packet...\n-----------\n");
+    }
+		else {
+      printf("-----------\nPacket lost...\n-----------\n");
+    }
+  }
 	 else
 		printf( "Nothing to Send \n\n");
 	 printWindow();
