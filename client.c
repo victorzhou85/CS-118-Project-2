@@ -257,4 +257,6 @@ void doSomething(char* filename, int sock, struct sockaddr_in serv_addr, double 
 	fwrite(allData, 1, fileSize, fp);
 	free(allData);
 	fclose(fp);
+
+	sendto(sock, "done", strlen("done"), 0, (struct sockaddr_in *) &serv_addr, sizeof(serv_addr)); //write to the socket
 }

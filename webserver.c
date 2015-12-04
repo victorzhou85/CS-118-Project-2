@@ -352,7 +352,7 @@ void sendPacket(int* command, int commandLength, int sock, const struct sockaddr
   else if(r > (1 - pcorr)) {
     char corruptPacket[4];
     sprintf(corruptPacket, "%d", -1);
-    int n = sendto(sock, corruptPacket, strlen(corruptPacket), 0, (struct sockaddr*)&cli_addr, (socklen_t) clilen);
+    int n = sendto(sock, corruptPacket, strlen(corruptPacket), 0, cli_addr, (socklen_t) clilen);
     if (n < 0)
          error("ERROR writing to socket");
     printf("-----------\nPacket corrupted! Sending corrupted packet...\n-----------\n");
@@ -552,6 +552,12 @@ int main(int argc, char *argv[])
           error("ERROR reading from socket");
       else {
         int ack = 0;
+
+        // check if done
+        if(strncmp("done", buffer, 4) == 0) {
+          printf("Receiver signaled final fully sent! Terminating...\n");
+          exit(0);
+        }
         // TODO: parse the acks from buffer:
 	ack = atoi(buffer);
         updateOnAcked(ack);
