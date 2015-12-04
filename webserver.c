@@ -21,12 +21,12 @@ typedef enum { false, true } bool;
 #include <time.h>
 
 static int const ssthresh = 5; // FIXME: Do we have to change this?
-static int const timeOut = 5;
+static int const timeOut = 1;
 
 bool test=false;
 bool resend = false;	//turns true during timeout
-float ploss=0;
-float pcorr=0;
+double ploss=0;
+double pcorr=0;
 
 
 //socket metadata
@@ -160,6 +160,13 @@ void printWindow(){
 }
 
 void updateOnAcked(int ack){
+  // on corrupt packed, do not update
+  // instead, just print we received a corrupt ACK
+  if (ack < 0) {
+    printf("Corrupt ACK received! Discarding...\n");
+    return;
+  }
+
   // TODO: Victor
   // Consider the situation when in the end of transfer
   // Not checking if the receiving ack is corrupted or not, assume all the packet it received is corrected
@@ -168,7 +175,7 @@ void updateOnAcked(int ack){
 	if (window->acked[ack]==1){
   		window->acked[ack] = 2;
  		 // Check the threshhold
- 		 if(isFinished()==false)//ssthresh >= window->windowLength)
+ 		 if(isFinished()==false && ssthresh >= window->windowLength)
  		 {
     			// slow start
 			printf("Adopting Slow Start Algorithm, Current Window Size: %d \n",window->windowLength);
@@ -237,7 +244,7 @@ void retransmit(int i, int sock, const struct sockaddr* cli_addr, socklen_t clil
 	window->windowLength = 1;
 	printWindow();
 	double r= (rand() % 100) * 1.0 / 100.0;			//random chance of loss!
-	if (r > ploss){
+	if (r < (1.0 - ploss - pcorr)){
 		printf("Random float : %f\n", r);
 		printf("Retransmitting segment : %d\n", i);
 		int n = sendto(sock,window->segments[i],1000,0,cli_addr,(socklen_t) clilen);
@@ -245,6 +252,14 @@ void retransmit(int i, int sock, const struct sockaddr* cli_addr, socklen_t clil
 			printf("problem sending\n");
 		window->acked[i]=1;
 	}
+  else if(r > (1 - pcorr)) {
+    char corruptPacket[4];
+    sprintf(corruptPacket, "%d", -1);
+    int n = sendto(sock, corruptPacket, strlen(corruptPacket), 0,cli_addr,(socklen_t) clilen);
+    if (n < 0)
+         error("ERROR writing to socket");
+    printf("-----------\nPacket corrupted! Sending corrupted packet...\n-----------\n");
+  }
 	else{
 		printf("Random float : %f\n", r);
 		printf("Packet %d sent but loss\n", i);
@@ -312,7 +327,7 @@ int* prepareToSend(int* commandLength){
     
   }
     *commandLength = count;	//record the size of the command
-	
+	// window->endRTTCommand = command[size-1]; // update the last command
   return command;
 }
 
@@ -329,11 +344,19 @@ void sendPacket(int* command, int commandLength, int sock, const struct sockaddr
     for( i = 0; i < commandLength; i++){
 	double r = (rand() % 100) * 1.0 / 100.0;		//random chance of loss!
 	int j = command[i];
-	if (r > ploss){
+	if (r < (1.0 - ploss - pcorr)){
 		printf("Random float : %f\n", r);
 		printf("Sending segment : %d\n", command[i]);
 		sendto(sock,window->segments[j],1000,0,cli_addr,(socklen_t) clilen);
 	}
+  else if(r > (1 - pcorr)) {
+    char corruptPacket[4];
+    sprintf(corruptPacket, "%d", -1);
+    int n = sendto(sock, corruptPacket, strlen(corruptPacket), 0, (struct sockaddr*)&cli_addr, (socklen_t) clilen);
+    if (n < 0)
+         error("ERROR writing to socket");
+    printf("-----------\nPacket corrupted! Sending corrupted packet...\n-----------\n");
+  }
 	else{
 		printf("Packet %d sent but loss\n", command[i]);
 	}
